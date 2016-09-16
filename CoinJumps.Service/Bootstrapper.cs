@@ -1,8 +1,10 @@
-﻿using log4net;
+﻿using CoinJumps.Service.Utils;
+using log4net;
 using Nancy;
 using Nancy.Bootstrapper;
 using Nancy.Bootstrappers.StructureMap;
 using Nancy.Diagnostics;
+using Nancy.ModelBinding;
 using StructureMap;
 
 namespace CoinJumps.Service
@@ -21,6 +23,7 @@ namespace CoinJumps.Service
         {
             // No registrations should be performed in here, however you may
             // resolve things that are needed during application startup.
+            container.Configure(x => x.For<IFieldNameConverter>().Use<TitleCaseFieldNameConverter>());
             base.ApplicationStartup(container, pipelines);
 
             pipelines.OnError.AddItemToEndOfPipeline((context, exception) =>

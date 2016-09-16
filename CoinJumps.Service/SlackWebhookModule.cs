@@ -22,7 +22,7 @@ namespace CoinJumps.Service
                 {
                     var model = this.Bind<SlackHookMessage>();
                     if (model.Text.ToUpper().StartsWith(CommandProcessor.Prefix))
-                        return commandProcessor.ProcessCommandText(model.Text);
+                        return commandProcessor.ProcessCommandText(model.UserName, model.Text);
 
                     return null;
                 }

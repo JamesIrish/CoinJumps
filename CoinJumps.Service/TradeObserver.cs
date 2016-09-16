@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
+using System.Threading.Tasks;
 using CoinJumps.Service.Models;
 using log4net;
 using Newtonsoft.Json;
@@ -25,6 +26,8 @@ namespace CoinJumps.Service
             // Create the StatusStream observable (cold) as soon as someone subscribes to the StatusStream 
             StatusStream = Observable.Create<SocketEvent>(statusObserver =>
                 {
+                    Task.Delay(500).Wait();
+
                     var socket = IO.Socket("http://socket.coincap.io");
 
                     socket.On(Socket.EVENT_CONNECT, data => statusObserver.OnNext(new SocketEvent {Status = "Connected", Exception = data as Exception}));
@@ -37,7 +40,7 @@ namespace CoinJumps.Service
                     socket.On(Socket.EVENT_RECONNECTING, data => statusObserver.OnNext(new SocketEvent { Status = "Socket Reconnecting", Exception = data as Exception }));
                     socket.On(Socket.EVENT_RECONNECT_ERROR, data => statusObserver.OnNext(new SocketEvent { Status = "Socket Reconnect Error", Exception = data as Exception }));
                     socket.On(Socket.EVENT_RECONNECT_FAILED, data => statusObserver.OnNext(new SocketEvent { Status = "Socket Reconnect Failed", Exception = data as Exception }));
-
+                    
                     socket.Open();
 
                     TradeStream = Observable.Create<CoinCapTradeEvent>(tradesObserver =>

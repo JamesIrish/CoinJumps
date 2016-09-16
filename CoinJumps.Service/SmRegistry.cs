@@ -8,10 +8,10 @@ namespace CoinJumps.Service
     {
         public SmRegistry()
         {
-            For<IFieldNameConverter>().Use<TitleCaseFieldNameConverter>();
             For<ICommandProcessor>().Use<CommandProcessor>();
             For<ITradeObserver>().Singleton().Use<TradeObserver>();
             For<ITradeMonitor>().Singleton().Use<TradeMonitor>();
+            For<ISlackMessenger>().Singleton().Use<SlackMessenger>();
         }
     }
 }

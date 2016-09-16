@@ -1,79 +1,162 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using log4net;
+using Newtonsoft.Json;
 
 namespace CoinJumps.Service
 {
     public interface ITradeMonitor
     {
-        bool Monitor(string coin, TimeSpan window, decimal percentageThreshold);
-        int Clear(string coin = "");
-        IList<CoinMonitor> List();
+        void Monitor(string user, string coin, TimeSpan window, decimal? percentageThreshold);
+        void Pause(string user);
+        void Resume(string user);
+        void Clear(string user, string coin = "");
+        IEnumerable<CoinMonitor> List(string user);
+        void Load();
         void Dispose();
     }
 
     public class TradeMonitor : IDisposable, ITradeMonitor
     {
+        private static readonly ILog Logger = LogManager.GetLogger(typeof(Program));
+
         private readonly Dictionary<string, CoinMonitor> _subscriptions;
 
         private readonly ITradeObserver _tradeObserver;
+        private readonly ISlackMessenger _slackMessenger;
 
-        public TradeMonitor(ITradeObserver tradeObserver)
+        private Lazy<string> ConfigurationsFile => new Lazy<string>(() => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Program.ServiceName, "configurations.json"));
+
+        public TradeMonitor(ITradeObserver tradeObserver, ISlackMessenger slackMessenger)
         {
             _tradeObserver = tradeObserver;
+            _slackMessenger = slackMessenger;
             _subscriptions = new Dictionary<string, CoinMonitor>();
         }
 
-        private string GenerateKey(string coin, TimeSpan window, decimal percentageThreshold)
+        private string GenerateKey(string user, string coin, TimeSpan window)
         {
-            return $"{coin}:{window.TotalSeconds}:{percentageThreshold}";
+            return $"{user}:{coin}:{window.TotalSeconds}";
         }
 
-        public IList<CoinMonitor> List()
+        public IEnumerable<CoinMonitor> List(string user)
         {
-            return _subscriptions.Values.ToList();
+            return _subscriptions.Values.Where(cm => cm.User.Equals(user)).ToList();
         }
 
-        public bool Monitor(string coin, TimeSpan window, decimal percentageThreshold)
+        public void Monitor(string user, string coin, TimeSpan window, decimal? percentageThreshold)
         {
-            var key = GenerateKey(coin, window, percentageThreshold);
-            if (_subscriptions.ContainsKey(key))
+            lock (_subscriptions)
             {
-                _subscriptions[key].Dispose();
-                _subscriptions.Remove(key);
+                var key = GenerateKey(user, coin, window);
+                if (_subscriptions.ContainsKey(key))
+                {
+                    _subscriptions[key].Dispose();
+                    _subscriptions.Remove(key);
+                }
+
+                if (percentageThreshold.HasValue)
+                {
+                    var coinMonitor = new CoinMonitor
+                    {
+                        User = user,
+                        Coin = coin,
+                        Window = window,
+                        PercentageThreshold = percentageThreshold.Value,
+                        IsPaused = false
+                    };
+                    _subscriptions.Add(key, coinMonitor);
+                    coinMonitor.Initialise(_tradeObserver, _slackMessenger);
+                }
             }
 
-            _subscriptions.Add(key, new CoinMonitor(_tradeObserver, coin, window, percentageThreshold));
-
-            return true;
+            Save();
         }
 
-        public int Clear(string coin = "")
+        public void Pause(string user)
         {
-            if (string.IsNullOrWhiteSpace(coin))
-                return ClearAll();
+            lock (_subscriptions)
+                foreach (var cm in _subscriptions.Where(kvp => kvp.Value.User.Equals(user)).Select(kvp => kvp.Value))
+                    cm.IsPaused = true;
 
-            var keys = _subscriptions.Where(kvp => kvp.Value.Coin.Equals(coin)).Select(kvp => kvp.Key).ToList();
-            foreach (var key in keys)
+            Save();
+        }
+        public void Resume(string user)
+        {
+            lock(_subscriptions)
+                foreach (var cm in _subscriptions.Where(kvp => kvp.Value.User.Equals(user)).Select(kvp => kvp.Value))
+                    cm.IsPaused = false;
+
+            Save();
+        }
+
+        public void Clear(string user, string coin = "")
+        {
+            lock (_subscriptions)
             {
-                _subscriptions[key].Dispose();
-                _subscriptions.Remove(key);
+                var monitors = _subscriptions.Where(kvp => kvp.Value.User.Equals(user)).ToList();
+
+                if (!string.IsNullOrWhiteSpace(coin))
+                    monitors = monitors.Where(kvp => kvp.Value.Coin.Equals(coin)).ToList();
+
+                foreach (var key in monitors.Select(kvp => kvp.Key))
+                {
+                    _subscriptions[key].Dispose();
+                    _subscriptions.Remove(key);
+                }
             }
-            return keys.Count;
+
+            Save();
         }
 
-        private int ClearAll()
+        public void Load()
         {
-            var count = _subscriptions.Count;
+            lock (_subscriptions)
+            {
+                var file = ConfigurationsFile.Value;
+
+                // If the directory is missing create it
+                var path = Path.GetDirectoryName(file);
+                if (!string.IsNullOrWhiteSpace(path) && !Directory.Exists(path)) Directory.CreateDirectory(path); 
+
+                using (var fs = new FileStream(file, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+                using (var sr = new StreamReader(fs))
+                {
+                    var json = sr.ReadToEnd();
+                    if (string.IsNullOrWhiteSpace(json)) return;
+                    var coinMonitors = JsonConvert.DeserializeObject<IList<CoinMonitor>>(json);
+                    foreach (var coinMonitor in coinMonitors)
+                    {
+                        var key = GenerateKey(coinMonitor.User, coinMonitor.Coin, coinMonitor.Window);
+                        _subscriptions.Add(key, coinMonitor);
+
+                        coinMonitor.Initialise(_tradeObserver, _slackMessenger);
+                    }
+                }
+            }
+        }
+
+        private void Save()
+        {
+            lock (_subscriptions)
+            {
+                using (var fs = new FileStream(ConfigurationsFile.Value, FileMode.Create, FileAccess.ReadWrite, FileShare.None))
+                using (var sw = new StreamWriter(fs))
+                {
+                    var json = JsonConvert.SerializeObject(_subscriptions.Select(kvp => kvp.Value).ToList());
+                    sw.Write(json);
+                    sw.Flush();
+                }
+            }
+        }
+        
+        public void Dispose()
+        {
             foreach (var subscription in _subscriptions)
                 subscription.Value.Dispose();
             _subscriptions.Clear();
-            return count;
-        }
-
-        public void Dispose()
-        {
-            ClearAll();
         }
     }
 }

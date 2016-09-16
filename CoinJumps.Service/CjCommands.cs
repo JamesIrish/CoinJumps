@@ -6,7 +6,8 @@
         List,
         Restart,
         Monitor,
-        Schedule,
+        Pause,
+        Resume,
         Clear
     }
 }

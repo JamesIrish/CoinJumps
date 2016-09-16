@@ -2,6 +2,7 @@
 using System.Reactive.Linq;
 using CoinJumps.Service.Models;
 using log4net;
+using Slack.Webhooks;
 
 namespace CoinJumps.Service
 {
@@ -9,37 +10,37 @@ namespace CoinJumps.Service
     {
         private static readonly ILog Logger = LogManager.GetLogger(typeof(CoinMonitor));
 
-
-        public string Coin { get; }
-        public TimeSpan Window { get; }
-        public decimal PercentageThreshold { get; }
-
-
+        private ISlackMessenger _slackMessenger;
         private IDisposable _subscription;
 
-        public CoinMonitor(ITradeObserver tradeObserver, string coin, TimeSpan window, decimal percentageThreshold)
+        public string User { get; set; }
+        public string Coin { get; set; }
+        public TimeSpan Window { get; set; }
+        public decimal PercentageThreshold { get; set; }
+        public bool IsPaused { get; set; }
+
+        public void Initialise(ITradeObserver tradeObserver, ISlackMessenger slackMessenger)
         {
-            Coin = coin;
-            Window = window;
-            PercentageThreshold = percentageThreshold;
+            _slackMessenger = slackMessenger;
+
             // Get the first price update  (no need to dispose as First() completes automatically)
             tradeObserver.TradeStream
-                .Where(t => t.Coin.Equals(coin))
+                .Where(t => t.Coin.Equals(Coin))
                 .FirstAsync()
                 .Subscribe(first =>
                 {
                     // Note the price
-                    LastPrice = new PricePoint {Coin = first.Coin, Price = first.Msg.Price};
+                    LastPrice = new PricePoint { Coin = first.Coin, Price = first.Msg.Price };
 
                     // Subscribe to the relevant window
                     _subscription = tradeObserver.TradeStream
-                        .Where(t => t.Coin.Equals(coin))
-                        .Sample(window)
+                        .Where(t => t.Coin.Equals(Coin))
+                        .Sample(Window)
                         .Subscribe(Compare);
                 });
         }
 
-        public PricePoint LastPrice { get; set; }
+        private PricePoint LastPrice { get; set; }
 
         private void Compare(CoinCapTradeEvent tradeEvent)
         {
@@ -48,8 +49,17 @@ namespace CoinJumps.Service
             var move = (curr/last) - 1m;
             var perc = move*100;
             var mesg = $"{tradeEvent.Msg.Long} moved by {perc:N2}% to ${tradeEvent.Msg.Price:N6}";
-            if (perc > PercentageThreshold || perc < -PercentageThreshold)
+            if (perc >= PercentageThreshold || perc < -PercentageThreshold)
+            {
+                if (!IsPaused)
+                {
+                    var alertsChannel = $"#alerts-{User}";
+                    if (alertsChannel.Length > 22) alertsChannel = alertsChannel.Substring(0, 22);
+                    var sm = new SlackMessage {Channel = alertsChannel, Text = mesg, Mrkdwn = false, Username = "CoinJumps"};
+                    _slackMessenger.Post(sm);
+                }
                 Logger.Warn(mesg);
+            }
             else
                 Logger.Debug(mesg);
 
@@ -58,7 +68,7 @@ namespace CoinJumps.Service
 
         public void Dispose()
         {
-            _subscription.Dispose();
+            _subscription?.Dispose();
         }
     }
 }
