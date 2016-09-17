@@ -21,7 +21,7 @@ Suggested settings for Slack:
 * _Disable_ push notifications for the **commands** channel.
 * _Enable_ push notifications for _your_ **alerts-....** channel.
 
-All commands start with the initials **CJ**.
+All commands start with the initials **CJ** and are case-insensitive. Beware your phones auto-correct system!
 
 ![Alt text](images/slack_commands.png "Commands")
 
