@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Reactive.Linq;
 using CoinJumps.Service.Models;
+using Humanizer;
 using log4net;
 using Slack.Webhooks;
 
@@ -48,7 +49,7 @@ namespace CoinJumps.Service
             var curr = tradeEvent.Msg.Price;
             var move = (curr/last) - 1m;
             var perc = move*100;
-            var mesg = $"{tradeEvent.Msg.Long} moved by {perc:N2}% to ${tradeEvent.Msg.Price:N6}";
+            var mesg = $"{tradeEvent.Msg.Long} moved by {perc:N2}% to ${tradeEvent.Msg.Price:N4} over {Window.Humanize()}";
             if (perc >= PercentageThreshold || perc < -PercentageThreshold)
             {
                 if (!IsPaused)
