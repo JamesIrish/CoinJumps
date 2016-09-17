@@ -43,7 +43,7 @@ namespace CoinJumps.Service
 
         public IEnumerable<CoinMonitor> List(string user)
         {
-            return _subscriptions.Values.Where(cm => cm.User.Equals(user)).ToList();
+            return _subscriptions.Values.Where(cm => cm.User.Equals(user)).OrderBy(cm => cm.Coin).ThenBy(cm => cm.Window).ToList();
         }
 
         public void Monitor(string user, string coin, TimeSpan window, decimal? percentageThreshold)
